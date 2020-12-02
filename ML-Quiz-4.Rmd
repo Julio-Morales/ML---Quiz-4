@@ -1,0 +1,209 @@
+---
+title: "Human Activity Recognition"
+author: "Julio Morales"
+date: "29-11-2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction,
+
+Ugulino, Cardador, Vega, Velloso, Milidiu and Fuks in their study entitled: "Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements"^1^, they measured and qualified weight lifting exercise by classifying into 5 classes from correct execution (Class A) to 4 common mistake executions organized from class B to E. "The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. (They) made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg)."^2^
+
+The main idea is to create a prediction model that could recognize excellent execution from wrong ones and deliver a feedback to athletes by orientating which movements they need to fix.
+
+In this report, its goal is to predict the way athletes did the exercise by using data set provided by Ugulino and partners in their study.
+
+## Getting and Cleaning Data
+Data sets are divided into training and test sets to build a predict model, predict its results and evaluate its accuracy. Information can be get from the following Urls:
+
+Training data set: [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+Test data set: [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+These data sets have 160 variables and 19622 and 20 observations respectively. In a first look of these data sets, 100 variables have more than 95% of its observations with NA, blank or #DIV/0. These variables were removed from each data sets.
+
+On the other hand, Test data set is a new set of data, because it does not have result or Classes. This new data set can be used to forecast its results.
+
+There are 7 non predictor variables that can be removed. They are: 
+"X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window" and "num_window". These variables are related to index, names and time of the observations.
+
+
+```{r Setup and download data, echo=FALSE}
+suppressWarnings(suppressMessages(library(caret)))
+suppressWarnings(suppressMessages(library(randomForest)))
+suppressWarnings(suppressMessages(library(dplyr)))
+suppressWarnings(suppressMessages(library(e1071)))
+library(caret)
+library(randomForest)
+library(e1071)
+library(dplyr)
+
+set.seed(1234)
+
+trainUrl<- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "pml-training.csv"
+testFile <- "pml-testing.csv"
+
+download.file(trainUrl,destfile = trainFile, method = "curl")
+dfTraining <- read.csv(trainFile, header = TRUE, sep = ",",stringsAsFactors = FALSE,na.strings=c("NA","","#DIV/0!"))
+
+download.file(testUrl,destfile = testFile, method = "curl")
+dfTest <- read.csv(testFile, header = TRUE, sep = ",",stringsAsFactors = FALSE,na.strings=c("NA","","#DIV/0!"))
+
+# Verifying NA observation greater than 90% of total data
+naobs <- sapply(dfTraining,function(x) sum(is.na(x)))/nrow(dfTraining)>.9 
+
+# Removing variables with more than 90% of observations with NA.
+# dim(dfTraining)
+dfTraining  <-dfTraining[,colSums(is.na(dfTraining)) == 0]
+# dim(dfTraining) # just to check variable elimination
+
+# dim(dfTest)
+dfTest  <-dfTest[,colSums(is.na(dfTest)) == 0]
+# dim(dfTest) # just to check variable elimination
+
+# Removing non predictor variables from data sets:
+# [1] "X"                    "user_name"     "raw_timestamp_part_1"
+# [4] "raw_timestamp_part_2" "cvtd_timestamp"       "new_window"
+# [7] "num_window"
+
+dfTraining <- dfTraining[,-c(1:7)]
+dfTest <- dfTest[,-c(1:7)]
+
+# Variable conversion: character into factor and consolidating all as numeric.
+dfTraining$classe <- factor(dfTraining$classe)
+dfTraining <- dfTraining %>% mutate_at(vars(1:52), as.numeric)
+
+# dfTest has problem_id instead of classe
+dfTest <- dfTest %>% mutate_at(vars(1:53), as.numeric)
+
+# Identifying zero covariates by using near zero function
+nsvList <- nearZeroVar(dfTraining[,-53],saveMetrics = TRUE)
+```
+
+In addition, a non zero variance analysis can be done to find out which variables have unique or closer to unique values by using caret function nearZeroVar: "... It not only removes predictors that have one unique value across samples (zero variance predictors), but also removes predictors that have both 1) few unique values relative to the number of samples and 2) large ratio of the frequency of the most common value to the frequency of the second most common value (near-zero variance predictors)."^3^
+
+None of predictors have been found as non zero variance:
+```{R Predictors}
+rownames(nsvList)
+```
+Finally, at the training data set it is found the following distribution of exercise observations from a total of 19622, about 28% of class A (right execution) and about 17% of the rest of the classes (mistake execution).
+
+```{r Look of Classe}
+table(dfTraining$classe)
+```
+
+## Building a Prediction Model.
+After exploring and adjusting data sets, for predicting model can be used a random forest to "...build(s) multiple decision trees and merges them together to get a more accurate and stable prediction" ^4^, in this case, a classification prediction of "Classe" output.
+
+```{r Random Forest 01}
+set.seed(1234)
+rf <- randomForest(classe~.,data=dfTraining)
+print(rf)
+```
+This is a first run of random forest prediction model with 7 variables tried at each split, this is a default value corresponding to square root of total variables 52.
+
+As a result, Out of Bag estimate error is 0.27%, that is more than 99% of accuracy. Out of bag if a set of data taken  from dfTraining and it is not used to build the model, if not then to test it.
+
+At the Confusion Matrix, its observable error is minimum for each prediction, less than 0.7% for each class with a few misclassification, less than 23, that represents a good model.
+
+On the other hand, after running the random forest model with dfTraining, the accuracy is measured by using a confusion matrix and it can be observed that its perfect: 1 or 100% and zero mistake or misclassification in its prediction as can be visualized at the matrix bellow. 
+
+```{r Prediction on training 01}
+p1 <- predict(rf,dfTraining)
+confusionMatrix(p1,dfTraining$classe)
+```
+This prediction is made with the same data to build it, therefore, the accuracy is always high.
+
+## Error Rate of Prediction Model
+In the following graph of error rate of the random forest, it can be observed that error rate is reduced when the number of trees is increased. In this case, error rate is stabilized or constant when more than 100 trees have been tested and voted.
+
+This information can be used to reconfigure the random forest to consider 100 trees instead of its default: 500 trees. It could help to improve its performance during calculations.
+
+```{r Error Rate 01, fig.width=6, fig.height=4, echo=FALSE}
+plot(rf)
+legend("top", colnames(rf$err.rate),col=1:4,cex=0.8,fill=1:4)
+```
+
+## Tune prediction model.
+TuneRF is a function that helps to identify the optimal value of mtry or number of variables randomly sampled as candidates at each split to consider for building the trees.
+
+```{r Tune RF, fig.width=6, fig.height=4}
+t <- tuneRF(dfTraining[,-53],dfTraining[,53],
+            stepFactor = 0.4,
+            plot = TRUE,
+            ntreetry = 100,
+            trace = TRUE,
+            improve = 0.5
+            )
+```
+
+In this case, it is confirmed that 7 is the optimal number.
+
+## Number of nodes for the trees
+In the following histogram is showed that more than 300 trees have between 800 and 950 nodes. This information give us an idea about how big the trees are.
+
+```{r histogram, fig.width=6, fig.height=4, echo=FALSE}
+hist(treesize(rf),
+     main = "Number of nodes for Trees",
+     col = "blue")
+```
+## Variable of Importance.
+Random forest can determine which variables have more impact on the outcome of the values, they are called variable of importance.
+
+In the following graphs can be observed all 52 variables and its top 10. Remember that model can be obtained by working with 7 of them.
+
+
+```{r Variable Importance, fig.width=6, fig.height=4}
+varImpPlot(rf)
+varImpPlot(rf, 
+           sort = T,
+           n.var = 10,
+           main = "Top 10 - Variable Importance")
+```
+
+## Cross Validation.
+By using this procedure, the prediction performance of models can be cross validated by reducing the number of predictors, ranked by variable of importance.
+
+```{r Cross validation}
+result <- rfcv(dfTraining[,-53],dfTraining[,53],cv.fold = 3)
+result$n.var
+result$error.cv
+with(result, plot(n.var, error.cv, type="o", lwd=2))
+```
+
+In this model, error rates increase over 10% when less than 6 variables are used. This confirm the 7 variables used in this report to build the model and obtain an error rate of 0,26%
+
+## Forecasting on new data
+
+Finally, this model can be used to forecast on Test data set and gives the following output:
+
+```{r Prediction New Data 01}
+p2 <- predict(rf,dfTest)
+p2
+```
+
+
+## Bibliography
+
+Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. [http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises#ixzz6fHf135Td](http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises#ixzz6fHf135Td)
+
+Leo Breiman and Adele Cutler, Random Forest [https://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm](https://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm)
+
+Niklas Donges, A COMPLETE GUIDE TO THE RANDOM FOREST ALGORITHM.[https://builtin.com/data-science/random-forest-algorithm](https://builtin.com/data-science/random-forest-algorithm)
+
+Dr. Bharatendra Rai, Random Forest in R - Classification and Prediction Example with Definition & Steps, [https://www.youtube.com/watch?v=dJclNIN-TPo](https://www.youtube.com/watch?v=dJclNIN-TPo)
+
+## Quotations
+1, 2 Human Activity Recognition: [http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises](http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises)
+
+3 Near-zero variance predictors. Should we remove them?: [https://tagteam.harvard.edu/hub_feeds/1981/feed_items/367058](https://tagteam.harvard.edu/hub_feeds/1981/feed_items/367058)
+
+4 [https://builtin.com/data-science/random-forest-algorithm](https://builtin.com/data-science/random-forest-algorithm)
